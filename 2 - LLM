@@ -1,0 +1,135 @@
+import pdfplumber
+import re
+import ftfy
+import pandas as pd  # Para salvar tabelas como CSV
+from langchain.text_splitter import RecursiveCharacterTextSplitter  # Importar bibliotecas dos chunks
+from sentence_transformers import SentenceTransformer
+import chromadb
+from transformers import AutoModelForCausalLM, AutoTokenizer
+import torch
+
+# Função para extrair texto e tabelas do PDF
+def extraindo_arquivo(arquivo):
+    texto_bruto = ""
+    tabelas_extraidas = []
+
+    with pdfplumber.open(arquivo) as pdf:
+        for pagina in pdf.pages:
+            # Extrai texto
+            if pagina.extract_text():
+                texto_bruto += pagina.extract_text() + "\n"
+
+            # Extrai tabelas
+            tabelas = pagina.extract_tables()
+            for tabela in tabelas:
+                tabelas_extraidas.append(pd.DataFrame(tabela))  # Converte para DataFrame
+
+    # Corrige problemas de codificação automaticamente
+    texto_bruto = ftfy.fix_text(texto_bruto)
+    # Corrige espaços extras e remove quebras de linha desnecessárias
+    texto_bruto = re.sub(r'\s+', ' ', texto_bruto)
+    # Remove caracteres estranhos que podem ter vindo do PDF
+    texto_bruto = re.sub(r'[^a-zA-ZÀ-ÿ0-9,.!?;:()\-– ]', '', texto_bruto)
+    # Remove espaços extras antes de pontuação
+    texto_bruto = re.sub(r'\s+([,.!?;:])', r'\1', texto_bruto)
+
+    return texto_bruto.strip(), tabelas_extraidas
+
+# Função para dividir o texto em chunks
+def dividir_chunk(texto):
+    splitter = RecursiveCharacterTextSplitter(
+        chunk_size=500,  # Tamanho máximo de cada chunk
+        chunk_overlap=10  # Sobreposição entre chunks para contexto
+    )
+    chunks = splitter.split_text(texto)
+    return chunks
+
+# Função para gerar embeddings dos chunks usando Sentence-Transformers
+def criar_embedding(chunks):
+    model = SentenceTransformer('all-MiniLM-L6-v2')  # Modelo otimizado para embeddings
+    embeddings = model.encode(chunks)  # Gerar os embeddings para cada chunk
+    return embeddings
+
+# Função para criar e armazenar os embeddings no banco vetorial Chroma
+def banco_vetorial(chunks, embeddings):
+    chroma_cliente = chromadb.EphemeralClient()
+    colecao = chroma_cliente.get_or_create_collection(name="meus_dados")
+    ids = [str(i) for i in range(len(chunks))]
+
+    colecao.add(
+        ids=ids,
+        embeddings=embeddings.tolist(),
+        documents=chunks,
+        metadatas=[{"indice": i} for i in range(len(chunks))]
+    )
+    return colecao
+
+# Função para criar o prompt para o modelo LLaMA
+def criar_prompt(pergunta, colecao):
+    # Criar embedding da pergunta
+    pergunta_embedding = criar_embedding([pergunta])
+
+    # Consultando a base vetorial
+    resultado = colecao.query(
+        query_embeddings=pergunta_embedding.tolist(),
+        n_results=5  # Número de trechos a serem recuperados
+    )
+
+    # Extraindo trechos relevantes
+    trechos_recuperados = resultado["documents"][0]
+
+    # Criando um contexto estruturado
+    contexto = "\n".join([f"{i+1}. {trecho}" for i, trecho in enumerate(trechos_recuperados)])
+
+    # Melhorando o prompt para garantir que o modelo gere uma resposta clara
+    prompt = f"""
+    Você é um assistente virtual especializado em responder perguntas com base em documentos oficiais.
+
+    **Pergunta do usuário:** "{pergunta}"
+
+    **Informações relevantes extraídas do documento:**
+    {contexto}
+
+    **Sua tarefa:**
+    Com base nas informações acima, **responda de forma objetiva e clara** à pergunta do usuário.
+    - Se houver uma resposta direta no contexto, apresente-a de forma resumida e compreensível.
+    - Se necessário, reformule a resposta para que fique mais natural e fácil de entender.
+    - Se o documento não fornecer informações suficientes, informe que a resposta não está disponível.
+
+    **Resposta:**
+    """
+
+    return prompt.strip()
+
+# Função para utilizar o LLaMA para gerar a resposta final
+def gerar_resposta(prompt):
+    # Carregar o modelo LLaMA
+    model_name = "meta-llama/Llama-2-7b-chat-hf"
+    tokenizer = AutoTokenizer.from_pretrained(model_name)
+    model = AutoModelForCausalLM.from_pretrained(model_name)
+
+    # Definir o token de padding como o token EOS (fim de sequência)
+    tokenizer.pad_token = tokenizer.eos_token
+
+    inputs = tokenizer(prompt, return_tensors="pt", padding=True, truncation=True, max_length=1024)
+    
+    # Ajuste no número máximo de tokens gerados (max_new_tokens)
+    with torch.no_grad():
+        output = model.generate(**inputs, max_new_tokens=200, num_return_sequences=1)
+
+    resposta = tokenizer.decode(output[0], skip_special_tokens=True)
+    return resposta
+
+
+# Abrindo e limpando o texto do PDF
+arquivo = "ia.pdf"
+texto_bruto, tabelas = extraindo_arquivo(arquivo)
+
+# Salva as tabelas extraídas como CSV
+for i, df in enumerate(tabelas):
+    df.to_csv(f"tabela_{i+1}.csv", index=False, header=False)  # Salva cada tabela
+
+# Dividir o texto em chunks e gerar embeddings
+chunks = dividir_chunk(texto_bruto)
+embeddings = criar_embedding(chunks)
+colecao = banco_vetorial(chunks, embeddings)
