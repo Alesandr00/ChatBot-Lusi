@@ -1,0 +1,52 @@
+import gradio as gr
+from transformers import pipeline, AutoModelForCausalLM, AutoTokenizer
+from langchain_community.llms import HuggingFacePipeline
+
+# Carregar o modelo e tokenizer
+model_name = "meta-llama/Llama-2-7b-chat-hf"
+tokenizer = AutoTokenizer.from_pretrained(model_name)
+model = AutoModelForCausalLM.from_pretrained(model_name)
+
+# Criar o pipeline sem recarregar modelo/tokenizer
+pipe = pipeline(
+    "text-generation",
+    model=model,  # Reutilizando o modelo já carregado
+    tokenizer=tokenizer,  # Reutilizando o tokenizer já carregado
+    max_new_tokens=200,
+    temperature=0.7,
+    top_p=0.9,
+    repetition_penalty=1.1
+)
+
+# Criar o LLM com LangChain
+llm = HuggingFacePipeline(pipeline=pipe)
+
+# Função para processar a pergunta e gerar resposta
+def chatbot_response(pergunta):
+    # Criar o prompt com o contexto extraído dos documentos
+    prompt = criar_prompt(pergunta, colecao)  
+    
+    # Gerar a resposta utilizando o LLM
+    resposta = llm(prompt)
+
+    if isinstance(resposta, list):  # Caso o pipeline retorne uma lista
+        resposta = resposta[0]["generated_text"]
+
+    # Encontrar a parte exata da resposta depois de "**Resposta:**"
+    indice_resposta = resposta.find("**Resposta:**")
+    if indice_resposta != -1:
+        return resposta[indice_resposta + len("**Resposta:**"):].strip()  # Retorna apenas a resposta
+
+    return resposta.strip()  # Caso o formato mude, retorna toda a resposta gerada
+
+# Criar a interface com Gradio para exibir a resposta
+iface = gr.Interface(
+    fn=chatbot_response,
+    inputs=gr.Textbox(label="Digite sua dúvida"),
+    outputs=gr.Textbox(label="Resposta do chatbot"),
+    title="Chatbot Lusi",
+    description="Digite uma pergunta e receba uma resposta baseada em documentos oficiais.",
+)
+
+# Rodar a interface no Colab
+iface.launch()
