@@ -37,17 +37,17 @@ def extraindo_arquivo(arquivo):
 
 # Função para dividir o texto em chunks
 def dividir_chunk(texto):
-    splitter = RecursiveCharacterTextSplitter(
+    chunk = RecursiveCharacterTextSplitter(
         chunk_size=500,  # Tamanho máximo de cada chunk
         chunk_overlap=10  # Sobreposição entre chunks para contexto
     )
-    chunks = splitter.split_text(texto)
+    chunks = chunk.split_text(texto)
     return chunks
 
 # Função para gerar embeddings dos chunks usando Sentence-Transformers
 def criar_embedding(chunks):
-    model = SentenceTransformer('all-MiniLM-L6-v2')  # Modelo otimizado para embeddings
-    embeddings = model.encode(chunks)  # Gerar os embeddings para cada chunk
+    modelo = SentenceTransformer('all-MiniLM-L6-v2')  # Modelo otimizado para embeddings
+    embeddings = modelo.encode(chunks)  # Gerar os embeddings para cada chunk
     return embeddings
 
 # Função para criar e armazenar os embeddings no banco vetorial Chroma
@@ -104,18 +104,18 @@ def criar_prompt(pergunta, colecao):
 # Função para utilizar o LLaMA para gerar a resposta final
 def gerar_resposta(prompt):
     # Carregar o modelo LLaMA
-    model_name = "meta-llama/Llama-2-7b-chat-hf"
-    tokenizer = AutoTokenizer.from_pretrained(model_name)
-    model = AutoModelForCausalLM.from_pretrained(model_name)
+    modelo_nome = "meta-llama/Llama-2-7b-chat-hf"
+    tokenizer = AutoTokenizer.from_pretrained(modelo_nome)
+    modelo = AutoModelForCausalLM.from_pretrained(modelo_nome)
 
     # Definir o token de padding como o token EOS (fim de sequência)
     tokenizer.pad_token = tokenizer.eos_token
 
-    inputs = tokenizer(prompt, return_tensors="pt", padding=True, truncation=True, max_length=1024)
+    entrada = tokenizer(prompt, return_tensors="pt", padding=True, truncation=True, max_length=1024)
     
     # Ajuste no número máximo de tokens gerados (max_new_tokens)
     with torch.no_grad():
-        output = model.generate(**inputs, max_new_tokens=200, num_return_sequences=1)
+        output = modelo.generate(**entrada, max_new_tokens=200, num_return_sequences=1)
 
     resposta = tokenizer.decode(output[0], skip_special_tokens=True)
     return resposta
