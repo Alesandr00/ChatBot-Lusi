@@ -3,7 +3,7 @@ import re
 import ftfy
 import pandas as pd  # Para salvar tabelas como CSV
 from langchain.text_splitter import RecursiveCharacterTextSplitter  # Importar bibliotecas dos chunks
-from sentence_transformers import SentenceTransformer
+from sentence_transformers import SentenceTransformer # Caso dê erro é a versão, rodar esse comando(!pip install --upgrade torch sentence-transformers) e reinicie a sessão
 import chromadb
 from transformers import AutoModelForCausalLM, AutoTokenizer
 import torch
